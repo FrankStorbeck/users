@@ -25,7 +25,6 @@ var (
 	ErrMissingData     = errors.New("missing data")
 	ErrNoSuchUser      = errors.New("no such user")
 	ErrUserExists      = errors.New("user exists")
-	ErrWeakPassword    = errors.New("password too weak")
 )
 
 // =========== User ===========
@@ -153,7 +152,7 @@ func (u *User) SetGroups(groupIds []int) error {
 
 // SetUserName sets the user name.
 func (u *User) SetUserName(uName string) error {
-	if !validEMailAddress(uName) {
+	if !isValidEMailAddress(uName) {
 		return ErrInvalidUserName
 	}
 
@@ -415,7 +414,7 @@ func (u *Users) sort() []*User {
 	return users
 }
 
-func validEMailAddress(s string) bool {
+func isValidEMailAddress(s string) bool {
 	_, err := mail.ParseAddress(s)
 	return err == nil
 }
