@@ -1,19 +1,21 @@
+// package users is a module to manage user data for users that can have access to a server.
+// The data are stored in a file like the password file in `*nix`.
+//
+// The following data are stored: user name, hashed password, user id, zero or more group id's, name, time of creration
+// and last time of modification. The user id, and the creation time are immutable. The modification time will change
+// when a modification of user name, password or group id's takes place.
+//
+// To store the data after any change they should be written to a file by calling Write().
 package users
 
 import (
-	"bufio"
-	"cmp"
 	"errors"
 	"fmt"
-	"net/mail"
+	"io"
 	"os"
-	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -25,336 +27,114 @@ var (
 	ErrMissingData     = errors.New("missing data")
 	ErrNoSuchUser      = errors.New("no such user")
 	ErrUserExists      = errors.New("user exists")
+
+	mutex sync.Mutex // mutex for reading and writing to file
 )
 
-// =========== User ===========
+// =========== AllUsers ===========
 
-// User holds the data for a user
-type User struct {
-	created        time.Time // time of creation
-	groupIds       []int     // identifiers for the groups, must be positive
-	hashedPassword string    // hashed password for the user
-	modified       time.Time // last modification time
-	Name           string    // user's name
-	userId         int       // identifier, must be positive
-	userName       string    // user name, must be a valid e-mail address
-	users          *Users    // Users for which this user is a member
+// AllUsers holds the data of all users for a server.
+type AllUsers struct {
+	lastId       int              // latest Id used
+	usersByEMail map[string]*User // user accounts, the key is the user name
+	usersById    map[int]*User    // user accounts, the key is the user id
+
 }
 
-// Created returns the creation time
-func (u User) Created() time.Time {
-	return u.created
-}
-
-// GroupIds returns the group id's.
-func (u *User) GroupIds() []int {
-	return u.groupIds
-}
-
-// IsInGroup returns true if the user is a member of a group.
-func (u User) IsInGroup(g int) bool {
-	return slices.Contains(u.groupIds, g)
-}
-
-// Modified returns the last date and time at which the user information was
-// modified.
-func (u User) Modified() time.Time {
-	return u.modified
-}
-
-// Parse creates a User from a string. The string must be formatted as
-// the one returned by String().
-func Parse(s string) (User, error) {
-	u := User{}
-	var err error
-
-	fields := strings.Split(s, ";")
-	if l := len(fields); l < 7 {
-		return u, fmt.Errorf("%w, less than 7 fields found: %d", ErrMissingData, l)
-	}
-	fields = fields[:7]
-
-	for i, fld := range fields {
-		switch i {
-		case 0: // userName, must be a valid e-mail address
-			if err = u.SetUserName(fld); err != nil {
-				return u, fmt.Errorf("%w (%s)", err, fld)
-			}
-
-		case 1: // hashed password
-			u.hashedPassword = fld
-
-		case 2: // user id
-			u.userId, err = strconv.Atoi(fld)
-			if err != nil || u.userId <= 0 {
-				return u, fmt.Errorf("%w for user %s: %s", ErrInvalidUserId, u.userName, fld)
-			}
-
-		case 3: // group id's
-			ids := []int{}
-
-			if len(fld) > 0 {
-				gIds := strings.Split(fld, ",")
-				for _, gId := range gIds {
-					id, err := strconv.Atoi(gId)
-					if err != nil {
-						return u, fmt.Errorf("%w for user %s: %w",
-							ErrInvalidGroupId, u.userName, err)
-					}
-					ids = append(ids, id)
-				}
-			}
-
-			if err = u.SetGroups(ids); err != nil {
-				return u, fmt.Errorf("cannot set group id's for user %s: %w",
-					u.userName, err)
-			}
-
-		case 4: // name
-			u.Name = fld
-
-		case 5: // creation time
-			u.created, err = time.Parse(time.RFC3339, fld)
-			if err != nil {
-				return u, fmt.Errorf("%w (creation) for user %s: %w",
-					ErrInvalidTime, u.userName, err)
-			}
-
-		case 6: // modification time
-			u.modified, err = time.Parse(time.RFC3339, fld)
-			if err != nil {
-				return u, fmt.Errorf("%w (modification) for user %s: %w",
-					ErrInvalidTime, u.userName, err)
-			}
-		}
-	}
-
-	return u, nil
-}
-
-// SetGroups sets the group id's. Id's must be positive.
-func (u *User) SetGroups(groupIds []int) error {
-	ids := []int{}
-	for _, id := range groupIds {
-		if id <= 0 {
-			return fmt.Errorf("%w: (%d)", ErrInvalidGroupId, id)
-		}
-		if !slices.Contains(ids, id) {
-			ids = append(ids, id)
-		}
-	}
-
-	slices.Sort(ids)
-	u.groupIds = ids
-	u.modified = time.Now()
-	return nil
-}
-
-// SetUserName sets the user name.
-func (u *User) SetUserName(uName string) error {
-	if !isValidEMailAddress(uName) {
-		return ErrInvalidUserName
-	}
-
-	if u.users != nil {
-		if _, found := u.users.users[uName]; found {
-			return ErrUserExists
-		}
-	}
-
-	current := u.userName
-	u.userName = uName
-
-	if u.users != nil {
-		delete(u.users.users, current)
-		u.users.users[uName] = u
-	}
-	u.modified = time.Now()
-	return nil
-}
-
-// SetPassword stores a hash of the plain password, but only if the
-// score is reached. A reasonable value for score is 30 or more.
-// If succesfull, it return nil.
-func (u *User) SetPassword(plainPassword string) error {
-	b, err := bcrypt.GenerateFromPassword([]byte(plainPassword), 12)
-	if err != nil {
-		return err
-	}
-
-	u.hashedPassword = string(b)
-	u.modified = time.Now()
-	return nil
-}
-
-// String returns a string with the user's information. It holds the
-// following fields separated by semi colons: user name, password hash,
-// user id, zero or more group id's separated by comma's, name and last
-// modification time in RFC3339 format. E.g.
-// john.doe@company.com;$2a$12$jRILr9NQVotdxSXeKPVZjfKmkSS5omc1OIhY5e2403uBHc2V30ium;3,4;John Doe:2023-11-24T15:38:00Z;2023-12-01T08:27:00Z
-func (u User) String() string {
-	groups := ""
-	for i, grpId := range u.groupIds {
-		if i > 0 {
-			groups += ","
-		}
-		groups += strconv.Itoa(grpId)
-	}
-
-	return fmt.Sprintf("%s;%s;%d;%s;%s;%s;%s",
-		u.userName, u.hashedPassword, u.userId, groups, u.Name,
-		u.created.Format(time.RFC3339), u.modified.Format(time.RFC3339))
-}
-
-// UserId returns the user's identifier.
-func (u User) UserId() int {
-	return u.userId
-}
-
-// UserName returns the user name.
-func (u *User) UserName() string {
-	return u.userName
-}
-
-// ValidatePassword validates a password. It returns nil if the password matches.
-func (u User) ValidatePassword(plainPassword string) error {
-	err := bcrypt.CompareHashAndPassword([]byte(u.hashedPassword), []byte(plainPassword))
-	if err == bcrypt.ErrMismatchedHashAndPassword {
-		err = ErrInvalidPassword
-	}
-	return err
-}
-
-// =========== Users ===========
-
-var mutex sync.Mutex
-
-type Users struct {
-	lastId int              // latest Id used
-	users  map[string]*User // user accounts, the key is the user name
-}
-
-// Deactivate deactivates the user with the provided user name.
-func (u *Users) Deactivate(uName string) error {
-	user, found := u.users[uName]
+// Deactivate deactivates the user with the provided user name, i.e. calling
+// ValidatePassword() will fail afterwards.
+func (aU *AllUsers) Deactivate(uNameOrId interface{}) error {
+	u, found := selectUser(aU, uNameOrId)
 	if !found {
 		return ErrNoSuchUser
 	}
 
-	user.hashedPassword = "*"
-	user.modified = time.Now()
+	u.hashedPassword = "*"
+	u.modified = time.Now()
 	return nil
 }
 
-// Get fetches a user with the provided user name.
-func (u *Users) Get(uName string) (User, error) {
-	var err error
-	user, found := u.users[uName]
+// Get fetches a user with the provided user name or user id.
+func (aU *AllUsers) Get(uNameOrId interface{}) (User, error) {
+	var (
+		err   error
+		u     *User
+		found bool
+	)
+	u, found = selectUser(aU, uNameOrId)
+
 	if !found {
-		return User{}, fmt.Errorf("%w: %s", ErrNoSuchUser, uName)
+		u, err = &User{}, fmt.Errorf("%w: %s", ErrNoSuchUser, uNameOrId)
 	}
-	return *user, err
+	return *u, err
 }
 
-// GetFunc fetches a slice of users from the users file for which f
-// returns true.
-func (u *Users) GetFunc(f func(usr User) bool) []User {
+// GetFunc returns a slice of users for which f returns true.
+func (aU *AllUsers) GetFunc(f func(u User) bool) []User {
 	matchingUsers := []User{}
 
-	for _, usr := range u.users {
-		if f(*usr) {
-			matchingUsers = append(matchingUsers, *usr)
+	for _, u := range aU.usersById {
+		if f(*u) {
+			matchingUsers = append(matchingUsers, *u)
 		}
 	}
 
 	return matchingUsers
 }
 
-// ParseAll parses all the user data from a string
-func ParseAll(s string) (*Users, error) {
-	u := &Users{users: make(map[string]*User)}
-
-	scanner := bufio.NewScanner(strings.NewReader(s))
-	for scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return u, err
-		}
-
-		usr, err := Parse(scanner.Text())
-		if err != nil {
-			return u, err
-		}
-		u.users[usr.userName] = &usr
-		usr.users = u
-
-		if u.lastId < usr.userId {
-			u.lastId = usr.userId
-		}
-	}
-
-	return u, nil
-}
-
 // Put puts the user data into u. When an entry for the user is already present
 // an error will be returned.
-func (u *Users) Put(user User) error {
-	user.userId = u.lastId + 1 // fill in some value before testing for errors
-	if _, err := Parse(user.String()); err != nil {
+func (aU *AllUsers) Put(u User) error {
+	u.userId = 1 // use some dummy value before testing for errors
+	if _, err := parse(u.String()); err != nil {
 		return err
 	}
 
-	if _, found := u.users[user.userName]; found {
+	if _, found := selectUser(aU, u.userName); found {
 		return ErrUserExists
 	}
 
-	user.modified = time.Now()
-	u.lastId++
-	// user.userId = u.lastId
-	user.users = u
-	u.users[user.userName] = &user
+	u.modified = time.Now()
+	aU.lastId++
+	u.userId = aU.lastId
+	mapUser(aU, &u)
 
 	return nil
 }
 
-// Read reads the user data from a file
-func Read(path string) (*Users, error) {
+// Read reads the user data from a file located at path. If the
+// file doesn't exists, an empty instance of AllUsers will be returned.
+func Read(path string) (*AllUsers, error) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	u := &Users{users: make(map[string]*User)}
+	aU := &AllUsers{
+		usersByEMail: make(map[string]*User),
+		usersById:    make(map[int]*User),
+	}
 
 	f, err := os.Open(path)
 	if err != nil {
-		return u, nil
+		if errors.Is(err, os.ErrNotExist) {
+			err = nil
+		}
+	} else {
+		var b []byte
+		b, err = io.ReadAll(f)
+		if err == nil {
+			aU, err = parseAll(string(b))
+		}
+		f.Close()
 	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		if err = scanner.Err(); err != nil {
-			return u, err
-		}
-
-		usr, err := Parse(scanner.Text())
-		if err != nil {
-			return u, err
-		}
-		u.users[usr.userName] = &usr
-
-		if u.lastId < usr.userId {
-			u.lastId = usr.userId
-		}
-	}
-
-	return u, nil
+	return aU, err
 }
 
 // String writes the user data in a string.
-func (u *Users) String() (string, error) {
-	users := u.sort()
+func (aU *AllUsers) String() (string, error) {
+	sortedUsers := aU.sort()
 
 	var b strings.Builder
-	for _, usr := range users {
+	for _, usr := range sortedUsers {
 		if _, err := b.WriteString(usr.String() + "\n"); err != nil {
 			return "", err
 		}
@@ -362,20 +142,13 @@ func (u *Users) String() (string, error) {
 	return b.String(), nil
 }
 
-// Update updates the user data.
-func (u *Users) Update(user User) error {
-	if _, found := u.users[user.userName]; !found {
-		return ErrNoSuchUser
-	}
-	user.modified = time.Now()
-	user.users = u
-
-	u.users[user.userName] = &user
-	return nil
-}
-
 // Write stores the user data in a file.
-func (u *Users) Write(path string) error {
+func (aU *AllUsers) Write(path string) error {
+	s, err := aU.String()
+	if err != nil {
+		return err
+	}
+
 	mutex.Lock()
 	defer mutex.Unlock()
 
@@ -385,36 +158,8 @@ func (u *Users) Write(path string) error {
 	}
 	defer f.Close()
 
-	users := u.sort()
-
-	for _, usr := range users {
-		if _, err := f.WriteString(usr.String() + "\n"); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	_, err = f.WriteString(s)
+	return err
 }
 
-// =========== tools ===========
-
-func (u *Users) sort() []*User {
-	users := make([]*User, len(u.users))
-
-	i := 0
-	for _, user := range u.users {
-		users[i] = user
-		i++
-	}
-
-	slices.SortFunc(users, func(uA, uB *User) int {
-		return cmp.Compare(uA.userId, uB.userId)
-	})
-
-	return users
-}
-
-func isValidEMailAddress(s string) bool {
-	_, err := mail.ParseAddress(s)
-	return err == nil
-}
+// =========== User ===========
