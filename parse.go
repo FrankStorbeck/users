@@ -82,10 +82,7 @@ func parse(s string) (User, error) {
 
 // parseAll parses all the user data from a string
 func parseAll(s string) (*AllUsers, error) {
-	aU := &AllUsers{
-		usersByEMail: make(map[string]*User),
-		usersById:    make(map[int]*User),
-	}
+	aU := &AllUsers{}
 	if len(s) == 0 {
 		return aU, nil
 	}
@@ -100,7 +97,7 @@ func parseAll(s string) (*AllUsers, error) {
 		if err != nil {
 			return aU, err
 		}
-		mapUser(aU, &usr)
+		aU.mapUser(&usr)
 
 		if aU.lastId < usr.userId {
 			aU.lastId = usr.userId

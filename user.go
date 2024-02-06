@@ -3,7 +3,7 @@ package users
 import (
 	"fmt"
 	"slices"
-	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -11,6 +11,7 @@ import (
 
 // User holds the data for a user
 type User struct {
+	allUsers       *AllUsers // AllUsers containing this user
 	created        time.Time // time of creation
 	groupIds       []int     // identifiers for the groups, must be positive
 	hashedPassword string    // hashed password for the user
@@ -18,7 +19,6 @@ type User struct {
 	name           string    // user's name
 	userId         int       // identifier, must be positive
 	userName       string    // user name, must be a valid e-mail address
-	allUsers       *AllUsers // AllUsers to which this user is a member
 }
 
 // Created returns the date and time of creation.
@@ -51,7 +51,7 @@ func (u User) Name() string {
 // otherwise the user name wil become an empty string.
 // Only positive and unique group id's will be accepted.
 // The user id will have a value of zero, which is an invalid value.
-// By putting it in a AllUsers struct, it will be set to a valid one.
+// After putting it in a AllUsers struct, it will be set to a valid one.
 // User has a deactivated status.
 func New(userName, name string, groupIds []int) (User, error) {
 	u := User{
@@ -62,6 +62,7 @@ func New(userName, name string, groupIds []int) (User, error) {
 	if !isValidEMailAddress(userName) {
 		return u, ErrInvalidUserName
 	}
+	u.userName = userName
 	u.modified = u.created
 	err := u.SetGroups(groupIds)
 
@@ -97,20 +98,22 @@ func (u *User) SetName(name string) {
 // address ErrInvalidUserName will be returned.
 // If user is putted into AllUsers and AllUsers already has a User with than
 // user name, ErrUserExists will be returned.
-func (u *User) SetUserName(uNameOrId string) error {
-	if !isValidEMailAddress(uNameOrId) {
+func (u *User) SetUserName(uName string) error {
+	uName = strings.TrimSpace(uName)
+	if !isValidEMailAddress(uName) {
 		return ErrInvalidUserName
 	}
 
 	if u.allUsers != nil {
-		if _, found := selectUser(u.allUsers, uNameOrId); found {
+		if _, found := selectUser(u.allUsers, uName); found {
 			return ErrUserExists
 		}
+		u.allUsers.unMapUser(u)
+		u.userName = uName
+		u.allUsers.mapUser(u)
+	} else {
+		u.userName = uName
 	}
-
-	unMapUser(u.allUsers, u)
-	u.userName = uNameOrId
-	mapUser(u.allUsers, u)
 
 	u.modified = time.Now()
 	return nil
@@ -134,16 +137,8 @@ func (u *User) SetPassword(plainPassword string) error {
 // user id, zero or more group id's separated by comma's, name, time of
 // creation and last modification time in RFC3339 format.
 func (u User) String() string {
-	groups := ""
-	for i, grpId := range u.groupIds {
-		if i > 0 {
-			groups += ","
-		}
-		groups += strconv.Itoa(grpId)
-	}
-
 	return fmt.Sprintf("%s;%s;%d;%s;%s;%s;%s",
-		u.userName, u.hashedPassword, u.userId, groups, u.name,
+		u.userName, u.hashedPassword, u.userId, intsString(u.groupIds), u.name,
 		u.created.Format(time.RFC3339), u.modified.Format(time.RFC3339))
 }
 
@@ -159,5 +154,9 @@ func (u User) UserName() string {
 
 // ValidatePassword validates a password. It returns nil if the password matches.
 func (u User) ValidatePassword(plainPassword string) error {
-	return bcrypt.CompareHashAndPassword([]byte(u.hashedPassword), []byte(plainPassword))
+	err := bcrypt.CompareHashAndPassword([]byte(u.hashedPassword), []byte(plainPassword))
+	if err != nil {
+		err = fmt.Errorf("%w: %w", ErrInvalidPassword, err)
+	}
+	return err
 }
