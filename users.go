@@ -173,9 +173,3 @@ func (aU *AllUsers) Write(path string, key []byte) error {
 	_, err = f.WriteString(s)
 	return err
 }
-
-// WriteS stores the user data in a string.
-func (aU *AllUsers) WriteS(path string, key []byte) (string, error) {
-	s, err := aU.String()
-	return s, err
-}

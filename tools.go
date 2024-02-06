@@ -22,15 +22,14 @@ func isValidEMailAddress(s string) bool {
 }
 
 func (aU *AllUsers) mapUser(u *User) {
-	if aU != nil {
-		if aU.usersByEMail == nil || aU.usersById == nil {
-			aU.usersByEMail = make(map[string]*User)
-			aU.usersById = make(map[int]*User)
-		}
-		aU.usersByEMail[u.userName] = u
-		aU.usersById[u.userId] = u
-		u.allUsers = aU
+	if aU.usersByEMail == nil || aU.usersById == nil {
+		aU.usersByEMail = make(map[string]*User)
+		aU.usersById = make(map[int]*User)
 	}
+	aU.usersByEMail[u.userName] = u
+	aU.usersById[u.userId] = u
+	u.allUsers = aU
+
 }
 
 func selectUser(aU *AllUsers, sOrI interface{}) (*User, bool) {
