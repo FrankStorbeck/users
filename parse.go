@@ -98,10 +98,6 @@ func parseAll(s string) (*AllUsers, error) {
 			return aU, err
 		}
 		aU.mapUser(&usr)
-
-		if aU.lastId < usr.userId {
-			aU.lastId = usr.userId
-		}
 	}
 
 	return aU, nil

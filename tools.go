@@ -26,6 +26,14 @@ func (aU *AllUsers) mapUser(u *User) {
 		aU.usersByEMail = make(map[string]*User)
 		aU.usersById = make(map[int]*User)
 	}
+
+	if u.userId == 0 {
+		aU.lastId++
+		u.userId = aU.lastId
+	} else if u.userId > aU.lastId {
+		aU.lastId = u.userId
+	}
+
 	aU.usersByEMail[u.userName] = u
 	aU.usersById[u.userId] = u
 	u.allUsers = aU

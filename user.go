@@ -108,6 +108,7 @@ func (u *User) SetUserName(uName string) error {
 		if _, found := selectUser(u.allUsers, uName); found {
 			return ErrUserExists
 		}
+
 		u.allUsers.unMapUser(u)
 		u.userName = uName
 		u.allUsers.mapUser(u)

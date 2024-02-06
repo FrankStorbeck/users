@@ -87,14 +87,13 @@ func (aU *AllUsers) Put(u *User) error {
 	if _, err := parse(u.String()); err != nil {
 		return err
 	}
+	u.userId = 0
 
 	if _, found := selectUser(aU, u.userName); found {
 		return ErrUserExists
 	}
 
 	u.modified = time.Now()
-	aU.lastId++
-	u.userId = aU.lastId
 	aU.mapUser(u)
 
 	return nil

@@ -152,9 +152,10 @@ var (
 )
 
 func TestAllString(t *testing.T) {
-	s := "a@b.c;*;1;1;A;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z\n" +
-		"b@b.c;*;2;2;B;2023-11-24T16:25:00Z;2023-12-05T08:14:00Z\n" +
-		"c@b.c;*;3;1,2;C;2023-11-24T16:25:00Z;2023-12-05T08:14:00Z\n"
+	s := `a@b.c;*;1;1;A;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z
+b@b.c;*;2;2;B;2023-11-24T16:25:00Z;2023-12-05T08:14:00Z
+c@b.c;*;3;1,2;C;2023-11-24T16:25:00Z;2023-12-05T08:14:00Z
+`
 	uA, err := parseAll(s)
 	if err != nil {
 		t.Fatalf("parseAll() returns an error: %s", err.Error())
@@ -200,11 +201,79 @@ func TestDeactivate(t *testing.T) {
 	}
 }
 
-func TestPutGetAndUserId(t *testing.T) {
-	aU, err := parseAll("")
+func TestGet(t *testing.T) {
+	s := `a@b.c;*;1;1;A;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z`
+	aU, err := parseAll(s)
 	if err != nil {
-		t.Fatalf("parse() returns an error: %s", err.Error())
+		t.Fatalf("parseAll() returns an error: %s", err.Error())
 	}
+
+	tests := []struct {
+		selector interface{}
+		err      error
+	}{
+		{1, nil},
+		{"a@b.c", nil},
+		{0, ErrNoSuchUser},
+		{"1", ErrNoSuchUser},
+		{2, ErrNoSuchUser},
+		{"", ErrNoSuchUser},
+	}
+
+	for _, tst := range tests {
+		u, err := aU.Get(tst.selector)
+		if notBothAreNil, sE1, sE2 := testErrs(err, tst.err); notBothAreNil {
+			if len(sE1) > 0 {
+				t.Errorf("Get(%v) returns an error: %s, should be: %s",
+					tst.selector, sE1, sE2)
+			}
+		} else if sU := u.String(); sU != s {
+			t.Errorf("Get(%v) returns\n%s;\nshould be\n%s", tst.selector, sU, s)
+		}
+	}
+}
+
+func TestUserName(t *testing.T) {
+	s := `a@b.c;*;1;3,4;A;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z
+d@e.f;*;2;1;A;2023-11-24T16:25:00Z;2023-12-05T08:14:00Z
+`
+	aU, err := parseAll(s)
+	if err != nil {
+		t.Fatalf("ParseAl() returns an error: %s", err.Error())
+	}
+
+	user, err := aU.Get("a@b.c")
+	if err != nil {
+		t.Fatalf("Get() returns an error: %s", err.Error())
+	}
+
+	err = user.SetUserName("e@b.c")
+	if err != nil {
+		t.Fatalf("SetUserName() returns an error: %s", err.Error())
+	}
+
+	_, err = aU.Get("a@b.c")
+	if err == nil {
+		t.Fatalf("Get() returns no error, should be: %s",
+			ErrNoSuchUser.Error())
+	} else if !errors.Is(err, ErrNoSuchUser) {
+		t.Fatalf("Get() returns wrong error: %s",
+			ErrNoSuchUser.Error())
+	}
+
+	_, err = aU.Get("e@b.c")
+	if err != nil {
+		t.Fatalf("Get() returns an error: %s", err.Error())
+	}
+
+	_, err = aU.Get("d@e.f")
+	if err != nil {
+		t.Fatalf("Get() returns an error: %s", err.Error())
+	}
+}
+
+func TestPutGetAndUserId(t *testing.T) {
+	aU := &AllUsers{}
 
 	tests := []struct {
 		userName string
@@ -282,57 +351,54 @@ c@b.c;*;2;1,2;C;2023-11-24T16:25:00Z;2023-12-05T08:14:00Z
 }
 
 func TestReadAndWrite(t *testing.T) {
-	tests := []struct {
-		users []User
-		key   []byte
-	}{
+	users := []User{
 		{
-			[]User{
-				{
-					userName:       "a@b.c",
-					hashedPassword: "$2a$12$O82XHvkCrkQzpkr30NNShu81RueblNmjIu6jeZuaGB.d8g7roROI.",
-					userId:         2,
-					groupIds:       []int{3, 4},
-					name:           "A",
-					created:        time.Date(2023, time.November, 24, 15, 38, 0, 0, time.UTC),
-					modified:       time.Date(2023, time.December, 5, 8, 14, 0, 0, time.UTC),
-				},
-				{
-					userName:       "d@e.f",
-					hashedPassword: "*",
-					userId:         1,
-					groupIds:       []int{},
-					name:           "D",
-					created:        time.Date(2023, time.November, 24, 14, 25, 0, 0, time.UTC),
-					modified:       time.Date(2023, time.December, 5, 8, 14, 0, 0, time.UTC),
-				},
-			},
-			[]byte{}, //("is this a good secret key or not"),
+			userName:       "a@b.c",
+			hashedPassword: "$2a$12$O82XHvkCrkQzpkr30NNShu81RueblNmjIu6jeZuaGB.d8g7roROI.",
+			userId:         2,
+			groupIds:       []int{3, 4},
+			name:           "A",
+			created:        time.Date(2023, time.November, 24, 15, 38, 0, 0, time.UTC),
+			modified:       time.Date(2023, time.December, 5, 8, 14, 0, 0, time.UTC),
+		},
+		{
+			userName:       "d@e.f",
+			hashedPassword: "*",
+			userId:         1,
+			groupIds:       []int{},
+			name:           "D",
+			created:        time.Date(2023, time.November, 24, 14, 25, 0, 0, time.UTC),
+			modified:       time.Date(2023, time.December, 5, 8, 14, 0, 0, time.UTC),
 		},
 	}
 
-	for _, tst := range tests {
+	keys := [][]byte{
+		[]byte(""),
+		[]byte("is this a good secret key or not"),
+	}
+
+	for _, key := range keys {
 		os.Remove(usersPath)
 
 		aU1 := &AllUsers{}
-		for _, usr := range tst.users {
-			u, err := New(usr.userName, usr.name, usr.groupIds)
+		for _, u := range users {
+			u, err := New(u.userName, u.name, u.groupIds)
 			if err != nil {
-				t.Fatalf("New(%q, %q, ...) returns an error: %s",
-					usr.userName, usr.name, err.Error())
+				t.Fatalf("New(%q, %q, [%s])) returns an error: %s",
+					u.userName, u.name, intsString(u.groupIds), err.Error())
 			}
 			err = aU1.Put(&u)
 			if err != nil {
-				t.Fatalf("Put(...) returns an error: %s", err.Error())
+				t.Fatalf("Put(\"%s;...\") returns an error: %s", u.userName, err.Error())
 			}
 		}
 
-		err := aU1.Write(usersPath, tst.key)
+		err := aU1.Write(usersPath, key)
 		if err != nil {
 			t.Fatalf("Write() returns an error: %s", err.Error())
 		}
 
-		aU2, err := Read(usersPath, tst.key)
+		aU2, err := Read(usersPath, key)
 		if err != nil {
 			t.Fatalf("Read() returns an error: %s", err.Error())
 		}
@@ -348,79 +414,8 @@ func TestReadAndWrite(t *testing.T) {
 		for k, u2 := range aU2.usersByEMail {
 			u1 := aU1.usersByEMail[k]
 			if u1S, u2S := u1.String(), u2.String(); u1S != u2S {
-				t.Errorf("different usersByEMail[%q]:\n%q and\n%q", k, u1S, u2S)
+				t.Errorf("usersByEMail[%q] returns :\n%q, should be\n%q", k, u2S, u1S)
 			}
 		}
-	}
-}
-
-func TestGet(t *testing.T) {
-	s := `a@b.c;*;1;1;A;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z`
-	aU, err := parseAll(s)
-	if err != nil {
-		t.Fatalf("parseAll() returns an error: %s", err.Error())
-	}
-
-	tests := []struct {
-		selector interface{}
-		err      error
-	}{
-		{1, nil},
-		{"a@b.c", nil},
-		{0, ErrNoSuchUser},
-		{"1", ErrNoSuchUser},
-		{2, ErrNoSuchUser},
-		{"", ErrNoSuchUser},
-	}
-
-	for _, tst := range tests {
-		u, err := aU.Get(tst.selector)
-		if notBothAreNil, sE1, sE2 := testErrs(err, tst.err); notBothAreNil {
-			if len(sE1) > 0 {
-				t.Errorf("Get(%v) returns an error: %s, should be: %s",
-					tst.selector, sE1, sE2)
-			}
-		} else if sU := u.String(); sU != s {
-			t.Errorf("Get(%v) returns\n%s;\nshould be\n%s", tst.selector, sU, s)
-		}
-	}
-}
-
-func TestUserName(t *testing.T) {
-	s := "a@b.c;$2a$12$fN63lsa0OxjgxcMpKA6cKlDQ9UmKhy7XS40fXR8jONaajOX3k1g1Y;1;3,4;A;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z\n" +
-		"d@e.f;$2a$12$O82XHvkCrkQzpkr30NNShu81RueblNmjIu6jeZuaGB.d8g7roROI.;2;1;A;2023-11-24T16:25:00Z;2023-12-05T08:14:00Z\n"
-	aU, err := parseAll(s)
-	if err != nil {
-		t.Fatalf("ParseAl() returns an error: %s", err.Error())
-	}
-
-	user, err := aU.Get("a@b.c")
-	if err != nil {
-		t.Fatalf("Get() returns an error: %s", err.Error())
-	}
-
-	err = user.SetUserName("e@b.c")
-	if err != nil {
-		t.Fatalf("SetUserName() returns an error: %s", err.Error())
-	}
-	aU.Write(usersPath, []byte{})
-
-	_, err = aU.Get("a@b.c")
-	if err == nil {
-		t.Fatalf("Get() returns no error, should be: %s",
-			ErrNoSuchUser.Error())
-	} else if !errors.Is(err, ErrNoSuchUser) {
-		t.Fatalf("Get() returns wrong error: %s",
-			ErrNoSuchUser.Error())
-	}
-
-	_, err = aU.Get("e@b.c")
-	if err != nil {
-		t.Fatalf("Get() returns an error: %s", err.Error())
-	}
-
-	_, err = aU.Get("d@e.f")
-	if err != nil {
-		t.Fatalf("Get() returns an error: %s", err.Error())
 	}
 }
