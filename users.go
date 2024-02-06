@@ -31,8 +31,6 @@ var (
 	mutex sync.Mutex // mutex for reading and writing to file
 )
 
-// =========== AllUsers ===========
-
 // AllUsers holds the data of all users for a server.
 type AllUsers struct {
 	lastId       int              // latest Id used
@@ -84,49 +82,55 @@ func (aU *AllUsers) GetFunc(f func(u User) bool) []User {
 
 // Put puts the user data into u. When an entry for the user is already present
 // an error will be returned.
-func (aU *AllUsers) Put(u User) error {
+func (aU *AllUsers) Put(u *User) error {
 	u.userId = 1 // use some dummy value before testing for errors
 	if _, err := parse(u.String()); err != nil {
 		return err
 	}
+	u.userId = 0
 
 	if _, found := selectUser(aU, u.userName); found {
 		return ErrUserExists
 	}
 
 	u.modified = time.Now()
-	aU.lastId++
-	u.userId = aU.lastId
-	mapUser(aU, &u)
+	aU.mapUser(u)
 
 	return nil
 }
 
-// Read reads the user data from a file located at path. If the
-// file doesn't exists, an empty instance of AllUsers will be returned.
-func Read(path string) (*AllUsers, error) {
+// Read reads the user data from a file located at path. The key is used to
+// decrypt the information in the file. The key must have a length of
+// 0, 16, 24, or 32 bytes. In case the length is zero, no decrytion will take place.
+// If the file doesn't exists, an empty instance of AllUsers will be returned.
+func Read(path string, key []byte) (*AllUsers, error) {
+	aU := &AllUsers{}
+
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	aU := &AllUsers{
-		usersByEMail: make(map[string]*User),
-		usersById:    make(map[int]*User),
-	}
-
 	f, err := os.Open(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			err = nil
+		if !errors.Is(err, os.ErrNotExist) {
+			return aU, err
 		}
-	} else {
-		var b []byte
-		b, err = io.ReadAll(f)
-		if err == nil {
-			aU, err = parseAll(string(b))
-		}
-		f.Close()
 	}
-	return aU, err
+	defer f.Close()
+
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return aU, err
+	}
+
+	s := string(b)
+	if len(key) != 0 {
+		s, err = de(s, key)
+		if err != nil {
+			return aU, err
+		}
+	}
+
+	return parseAll(s)
 }
 
 // String writes the user data in a string.
@@ -143,10 +147,17 @@ func (aU *AllUsers) String() (string, error) {
 }
 
 // Write stores the user data in a file.
-func (aU *AllUsers) Write(path string) error {
+func (aU *AllUsers) Write(path string, key []byte) error {
 	s, err := aU.String()
 	if err != nil {
 		return err
+	}
+
+	if len(key) != 0 {
+		s, err = en(s, key)
+		if err != nil {
+			return err
+		}
 	}
 
 	mutex.Lock()
@@ -161,5 +172,3 @@ func (aU *AllUsers) Write(path string) error {
 	_, err = f.WriteString(s)
 	return err
 }
-
-// =========== User ===========
