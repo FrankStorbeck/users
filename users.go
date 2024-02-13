@@ -9,6 +9,7 @@
 package users
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -36,10 +37,9 @@ type AllUsers struct {
 	lastId       int              // latest Id used
 	usersByEMail map[string]*User // user accounts, the key is the user name
 	usersById    map[int]*User    // user accounts, the key is the user id
-
 }
 
-// Deactivate deactivates the user with the provided user name, i.e. calling
+// Deactivate deactivates the user with the provided user name or user id, i.e. calling
 // ValidatePassword() will fail afterwards.
 func (aU *AllUsers) Deactivate(uNameOrId interface{}) error {
 	u, found := selectUser(aU, uNameOrId)
@@ -80,14 +80,38 @@ func (aU *AllUsers) GetFunc(f func(u User) bool) []User {
 	return matchingUsers
 }
 
+// ParseAll creates an AllUsers instance by parsing a string. The string must be formatted
+// as a sequence of substrings eache formatted accordingly to those as returned by String()
+// and separated by newline characters.
+func ParseAll(s string) (*AllUsers, error) {
+	aU := &AllUsers{}
+	if len(s) == 0 {
+		return aU, nil
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(s))
+	for scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return aU, err
+		}
+
+		usr, err := Parse(scanner.Text())
+		if err != nil {
+			return aU, err
+		}
+		aU.mapUser(&usr)
+	}
+
+	return aU, nil
+}
+
 // Put puts the user data into u. When an entry for the user is already present
 // an error will be returned.
 func (aU *AllUsers) Put(u *User) error {
-	u.userId = 1 // use some dummy value before testing for errors
-	if _, err := parse(u.String()); err != nil {
+	// test for errors:
+	if _, err := Parse(u.String()); err != nil {
 		return err
 	}
-	u.userId = 0
 
 	if _, found := selectUser(aU, u.userName); found {
 		return ErrUserExists
@@ -130,7 +154,7 @@ func Read(path string, key []byte) (*AllUsers, error) {
 		}
 	}
 
-	return parseAll(s)
+	return ParseAll(s)
 }
 
 // String writes the user data in a string.

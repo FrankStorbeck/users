@@ -19,9 +19,9 @@ func TestNew(t *testing.T) {
 		err      error
 	}{
 		{"a@b.c", "A", []int{}, nil},
-		{"a@b.c", "A", []int{1, 2}, nil},
-		{"a@.c", "A", []int{1, 2}, ErrInvalidUserName},
-		{"a@b.c", "A", []int{0}, ErrInvalidGroupId},
+		{"a@b.c", "A", []int{0, 1}, nil},
+		{"a@.c", "A", []int{0, 1}, ErrInvalidUserName},
+		{"a@b.c", "A", []int{-1}, ErrInvalidGroupId},
 	}
 
 	for _, tst := range tests {
@@ -126,14 +126,14 @@ func TestSetGroups(t *testing.T) {
 		{[]int{1, 1}, []int{1}, 2, false, nil},
 		{[]int{1, 1, 2, 1, 3}, []int{1, 2, 3}, 0, false, nil},
 		{[]int{3, 1, 2, 2, 1, 1}, []int{1, 2, 3}, 2, true, nil},
-		{[]int{1, 0}, []int{}, 0, false, ErrInvalidGroupId},
+		{[]int{1, -1}, []int{}, 0, false, ErrInvalidGroupId},
 	}
 
 	for _, tst := range tests {
 		err := u.SetGroups(tst.ids)
 		if notBothAreNil, sE1, sE2 := testErrs(err, tst.err); notBothAreNil {
 			if len(sE1) > 0 {
-				t.Errorf("SetGroups() returns an error %s, should be %s", sE1, sE2)
+				t.Errorf("SetGroups(%v) returns an error %s, should be %s", tst.ids, sE1, sE2)
 			}
 		} else {
 			if got, want := intsString(u.GroupIds()), intsString(tst.want); got != want {
@@ -147,6 +147,86 @@ func TestSetGroups(t *testing.T) {
 	}
 }
 
+func TestParse(t *testing.T) {
+	tests := []struct {
+		s   string
+		err error
+	}{
+		{
+			"a@b.c;$2a$12$cKlDQ9UmKhy7XS40fXR8jONaajOX3k1g1YfN63lsa0OxjgxcMpKA6;1;3,4;A;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z",
+			nil,
+		},
+		{
+			"d@e.f;$2a$12$cKlDQ9UmKhy7XS40fXR8jONaajOX3k1g1YfN63lsa0OxjgxcMpKA6;2;1;A;2023-11-24T16:25:00Z;2023-12-05T08:14:00Z",
+			nil,
+		},
+		{
+			"a@.c;$2a$12$O82XHvkCrkQzpkr30NNShu81RueblNmjIu6jeZuaGB.d8g7roROI.;3;3;A;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z",
+			ErrInvalidUserName,
+		},
+		{
+			"a@b.c;$2a$12$O82XHvkCrkQzpkr30NNShu81RueblNmjIu6jeZuaGB.d8g7roROI.;-1;3;A;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z",
+			ErrInvalidUserId,
+		},
+		{
+			"a@b.c;$2a$12$O82XHvkCrkQzpkr30NNShu81RueblNmjIu6jeZuaGB.d8g7roROI.;o;3;A;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z",
+			ErrInvalidUserId,
+		},
+		{
+			"a@b.c;$2a$12$O82XHvkCrkQzpkr30NNShu81RueblNmjIu6jeZuaGB.d8g7roROI.;1;-3,9;A;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z",
+			ErrInvalidGroupId,
+		},
+		{
+			"d@e.f;$2a$12$cKlDQ9UmKhy7XS40fXR8jONaajOX3k1g1YfN63lsa0OxjgxcMpKA6;2;1;A;2023-11-24xx16:25:00Z;2023-12-05T08:14:00Z",
+			ErrInvalidTime,
+		},
+	}
+
+	for _, tst := range tests {
+		user, err := Parse(tst.s)
+		if notBothAreNil, sE1, sE2 := testErrs(err, tst.err); notBothAreNil {
+			if len(sE1) > 0 {
+				t.Errorf("Parse(%q) returns error %q, should be %q", tst.s, sE1, sE2)
+			}
+		} else if gS := user.String(); gS != tst.s {
+			t.Errorf("Parse(%q) returns\n%q,\nshould be\n%q", tst.s, gS, tst.s)
+		}
+	}
+}
+
+func TestParseAll(t *testing.T) {
+	tests := []struct {
+		s   string
+		l   int
+		err error
+	}{
+		{
+			"a@b.c;$2a$12$O82XHvkCrkQzpkr30NNShu81RueblNmjIu6jeZuaGB.d8g7roROI.;1;3,4;A;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z\n" +
+				"d@e.f;$2a$12$cKlDQ9UmKhy7XS40fXR8jONaajOX3k1g1YfN63lsa0OxjgxcMpKA6;2;1;A;2023-11-24T16:25:00Z;2023-12-05T08:14:00Z\n",
+			2,
+			nil,
+		},
+		{
+			"a@b.c;$2a$12$O82XHvkCrkQzpkr30NNShu81RueblNmjIu6jeZuaGB.d8g7roROI.;-1;3,4;D;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z\n" +
+				"d@e.f;$2a$12$cKlDQ9UmKhy7XS40fXR8jONaajOX3k1g1YfN63lsa0OxjgxcMpKA6;2;1;A;2023-11-24T16:25:00Z;2023-12-05T08:14:00Z\n",
+			2,
+			ErrInvalidUserId,
+		},
+	}
+
+	for _, tst := range tests {
+		users, err := ParseAll(tst.s)
+		if notBothAreNil, sE1, sE2 := testErrs(err, tst.err); notBothAreNil {
+			if len(sE1) > 0 {
+				t.Errorf("ParseAll(%q) returns error %q, should be %q",
+					tst.s[:5], sE1, sE2)
+			}
+		} else if l := len(users.usersByEMail); l != tst.l {
+			t.Errorf("ParseAll(%q) result has %d users, should be %d", tst.s[:5], l, tst.l)
+		}
+	}
+}
+
 var (
 	usersPath = filepath.Join("testing", ".users.txt")
 )
@@ -156,9 +236,9 @@ func TestAllString(t *testing.T) {
 b@b.c;*;2;2;B;2023-11-24T16:25:00Z;2023-12-05T08:14:00Z
 c@b.c;*;3;1,2;C;2023-11-24T16:25:00Z;2023-12-05T08:14:00Z
 `
-	uA, err := parseAll(s)
+	uA, err := ParseAll(s)
 	if err != nil {
-		t.Fatalf("parseAll() returns an error: %s", err.Error())
+		t.Fatalf("ParseAll() returns an error: %s", err.Error())
 	}
 	sAll, err := uA.String()
 	if err != nil {
@@ -171,9 +251,9 @@ c@b.c;*;3;1,2;C;2023-11-24T16:25:00Z;2023-12-05T08:14:00Z
 
 func TestDeactivate(t *testing.T) {
 	s := `a@b.c;$x$x$xxxxxx;1;1;A;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z`
-	aU, err := parseAll(s)
+	aU, err := ParseAll(s)
 	if err != nil {
-		t.Fatalf("parseAll() returns an error: %s", err.Error())
+		t.Fatalf("ParseAll() returns an error: %s", err.Error())
 	}
 
 	tests := []struct {
@@ -203,9 +283,9 @@ func TestDeactivate(t *testing.T) {
 
 func TestGet(t *testing.T) {
 	s := `a@b.c;*;1;1;A;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z`
-	aU, err := parseAll(s)
+	aU, err := ParseAll(s)
 	if err != nil {
-		t.Fatalf("parseAll() returns an error: %s", err.Error())
+		t.Fatalf("ParseAll() returns an error: %s", err.Error())
 	}
 
 	tests := []struct {
@@ -237,7 +317,7 @@ func TestUserName(t *testing.T) {
 	s := `a@b.c;*;1;3,4;A;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z
 d@e.f;*;2;1;A;2023-11-24T16:25:00Z;2023-12-05T08:14:00Z
 `
-	aU, err := parseAll(s)
+	aU, err := ParseAll(s)
 	if err != nil {
 		t.Fatalf("ParseAl() returns an error: %s", err.Error())
 	}
@@ -286,7 +366,7 @@ func TestPutGetAndUserId(t *testing.T) {
 		{"D@B.C", "d", []int{1, 2}, nil},
 		{"E@B.C", "e", []int{2}, nil},
 		{"@B.C", "", []int{}, ErrInvalidUserName},
-		{"G@B.C", "G", []int{0}, ErrInvalidGroupId},
+		{"G@B.C", "G", []int{-1, 0}, ErrInvalidGroupId},
 	}
 
 	uId := 0
@@ -325,9 +405,9 @@ c@b.c;*;2;1,2;C;2023-11-24T16:25:00Z;2023-12-05T08:14:00Z
 `
 	l := 3
 
-	aU, err := parseAll(s)
+	aU, err := ParseAll(s)
 	if err != nil {
-		t.Fatalf("parseAll() returns an error: %s", err.Error())
+		t.Fatalf("ParseAll() returns an error: %s", err.Error())
 	}
 
 	selectedUsers := aU.GetFunc(func(u User) bool {
