@@ -249,7 +249,7 @@ c@b.c;*;3;1,2;C;2023-11-24T16:25:00Z;2023-12-05T08:14:00Z
 	}
 }
 
-func TestDeactivate(t *testing.T) {
+func TestActivate(t *testing.T) {
 	s := `a@b.c;$x$x$xxxxxx;1;1;A;2023-11-24T15:38:00Z;2023-12-05T08:14:00Z`
 	aU, err := ParseAll(s)
 	if err != nil {
@@ -273,9 +273,25 @@ func TestDeactivate(t *testing.T) {
 			}
 		} else {
 			sU, _ := aU.Get(tst.selector)
-			if sU.hashedPassword != "*" {
-				t.Errorf("Deactivate(%v) returns %q; should be \"*\"",
-					tst.selector, sU.hashedPassword)
+			want := "*$x$x$xxxxxx"
+			if sU.hashedPassword != want {
+				t.Errorf("Deactivate(%v) returns %q; should be %q",
+					tst.selector, sU.hashedPassword, want)
+			}
+		}
+
+		err = aU.Reactivate(tst.selector)
+		if notBothAreNil, sE1, sE2 := testErrs(err, tst.err); notBothAreNil {
+			if len(sE1) > 0 {
+				t.Errorf("Reactivate(%v) returns an error: %s, should be: %s",
+					tst.selector, sE1, sE2)
+			}
+		} else {
+			sU, _ := aU.Get(tst.selector)
+			want := "$x$x$xxxxxx"
+			if sU.hashedPassword != want {
+				t.Errorf("Reactivate(%v) returns %q; should be %q",
+					tst.selector, sU.hashedPassword, want)
 			}
 		}
 	}
