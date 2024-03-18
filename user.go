@@ -22,6 +22,16 @@ type User struct {
 	userName       string    // user name, must be a valid e-mail address
 }
 
+// Deactivate deactivates the user.
+func (u *User) Deactivate() {
+	if u.hashedPassword[:1] == "*" {
+		return
+	}
+
+	u.hashedPassword = "*" + u.hashedPassword
+	u.modified = time.Now()
+}
+
 // Created returns the date and time of creation.
 func (u User) Created() time.Time {
 	return u.created
@@ -138,6 +148,17 @@ func Parse(s string) (User, error) {
 	}
 
 	return u, nil
+}
+
+// Reactivate reactivates the user with the provided user name or user id.
+// can be validated again.
+func (u *User) Reactivate() {
+	if len(u.hashedPassword) == 0 || u.hashedPassword[:1] != "*" {
+		return
+	}
+
+	u.hashedPassword = u.hashedPassword[1:]
+	u.modified = time.Now()
 }
 
 // SetGroups sets the group id's. Only non negative and unique group id's

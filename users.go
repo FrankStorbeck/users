@@ -46,9 +46,8 @@ func (aU *AllUsers) Deactivate(uNameOrId interface{}) error {
 	if !found {
 		return ErrNoSuchUser
 	}
+	u.Deactivate()
 
-	u.hashedPassword = "*"
-	u.modified = time.Now()
 	return nil
 }
 
@@ -120,6 +119,18 @@ func (aU *AllUsers) Put(u *User) error {
 	u.modified = time.Now()
 	aU.mapUser(u)
 
+	return nil
+}
+
+// Reactivate reactivates the user with the provided user name or user id.
+// can be validated again.
+func (aU *AllUsers) Reactivate(uNameOrId interface{}) error {
+	u, found := selectUser(aU, uNameOrId)
+	if !found {
+		return ErrNoSuchUser
+	}
+
+	u.Reactivate()
 	return nil
 }
 
