@@ -146,9 +146,10 @@ func Read(path string, key []byte) (*AllUsers, error) {
 
 	f, err := os.Open(path)
 	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return aU, err
+		if errors.Is(err, os.ErrNotExist) {
+			err = nil
 		}
+		return aU, err
 	}
 	defer f.Close()
 
