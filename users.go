@@ -52,7 +52,7 @@ func (aU *AllUsers) Deactivate(uNameOrId interface{}) error {
 }
 
 // Get fetches a user with the provided user name or user id.
-func (aU *AllUsers) Get(uNameOrId interface{}) (User, error) {
+func (aU *AllUsers) Get(uNameOrId interface{}) (*User, error) {
 	var (
 		err   error
 		u     *User
@@ -63,16 +63,16 @@ func (aU *AllUsers) Get(uNameOrId interface{}) (User, error) {
 	if !found {
 		u, err = &User{}, fmt.Errorf("%w: %s", ErrNoSuchUser, uNameOrId)
 	}
-	return *u, err
+	return u, err
 }
 
 // GetFunc returns a slice of users for which f returns true.
-func (aU *AllUsers) GetFunc(f func(u User) bool) []User {
-	matchingUsers := []User{}
+func (aU *AllUsers) GetFunc(f func(u User) bool) []*User {
+	matchingUsers := []*User{}
 
 	for _, u := range aU.usersById {
 		if f(*u) {
-			matchingUsers = append(matchingUsers, *u)
+			matchingUsers = append(matchingUsers, u)
 		}
 	}
 
